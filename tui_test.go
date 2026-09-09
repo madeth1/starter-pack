@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"os"
 	"testing"
 	"time"
 )
@@ -11,8 +12,12 @@ const (
 	keyEnter = "\r"
 )
 
-// drive runs fn with the forms wired to a pipe, feeding keys on a delay so each
-// frame has been processed before the next keystroke lands.
+// drive runs fn with the forms wired to a pipe, feeding keys one at a time.
+//
+// io.Pipe gives back-pressure - a write blocks until bubbletea's input loop
+// reads it - but reading is not processing, and huh advances between groups
+// asynchronously. So a settle delay is still needed after each key; feeding
+// them all at once makes the second page's Enter land on the first page.
 //
 // Only the resulting selection is asserted on, never the rendered output:
 // bubbletea detects a non-TTY writer and skips drawing altogether, so the
@@ -27,17 +32,27 @@ func drive(t *testing.T, keys []string, fn func()) {
 	go func() { fn(); close(done) }()
 
 	for _, k := range keys {
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(settle)
 		if _, err := pw.Write([]byte(k)); err != nil {
 			break
 		}
 	}
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		t.Fatal("form did not finish: it is waiting on more input than expected")
 	}
 }
+
+// settle is how long a keystroke is given to be processed before the next one.
+// Generous on purpose: this runs in the release pipeline, where a loaded runner
+// failing the build over a lost keypress would be far worse than a slow test.
+var settle = func() time.Duration {
+	if os.Getenv("CI") != "" {
+		return 750 * time.Millisecond
+	}
+	return 250 * time.Millisecond
+}()
 
 // Ordered so that the first entry overall is NOT the first entry of the Backend
 // category. Any test that lands on litestar therefore proves the second page

@@ -43,6 +43,7 @@ nfpms:
     maintainer: madeth1 <alexstefan88@gmail.com>
     homepage: https://github.com/madeth1/starter-pack
     description: Scaffold projects from templates, with an arrow-key picker.
+    license: MIT
     section: devel
     priority: optional
     # git is not optional: the catalog is fetched with it.
@@ -58,6 +59,7 @@ homebrew_casks:
       token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/madeth1/starter-pack
     description: Scaffold projects from templates, with an arrow-key picker.
+    license: MIT
     # The binaries are not code-signed, so strip the quarantine bit or macOS
     # refuses to run them.
     hooks:

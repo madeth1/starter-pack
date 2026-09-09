@@ -40,6 +40,7 @@ type Template struct {
 
 	ID     string `toml:"-"`
 	Dir    string `toml:"-"`
+	Root   string `toml:"-"` // the catalog checkout this template came from
 	Source string `toml:"-"` // "" for the shared catalog, else the source's label
 }
 
@@ -161,9 +162,22 @@ func syncRepo(url string, allowPrompt bool) (string, error) {
 		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 			return "", err
 		}
-		if out, err := run("clone", "--depth", "1", url, dir); err != nil {
-			os.RemoveAll(dir) // don't leave a half-clone that looks warm next run
-			return "", fmt.Errorf("cloning %s: %w\n%s\nIf this repo is private, check `ssh -T git@github.com` or run `gh auth setup-git`", url, err, strings.TrimSpace(string(out)))
+		// Fetch the manifests, not the templates: a catalog can be large and
+		// you only ever use one template per run. Blobs are fetched lazily and
+		// the working tree is narrowed to the *.toml files the picker needs;
+		// the chosen template's files/ is checked out later by materialize.
+		out, err := run("clone", "--depth", "1", "--filter=blob:none", "--sparse", url, dir)
+		if err != nil {
+			// Older git, or a server with no partial-clone support.
+			if out, err = run("clone", "--depth", "1", url, dir); err != nil {
+				os.RemoveAll(dir) // don't leave a half-clone that looks warm next run
+				return "", fmt.Errorf("cloning %s: %w\n%s\nIf this repo is private, check `ssh -T git@github.com` or run `gh auth setup-git`", url, err, strings.TrimSpace(string(out)))
+			}
+			return dir, nil
+		}
+		if out, err := run("-C", dir, "sparse-checkout", "set", "--no-cone", "/tools.toml", "/*/template.toml"); err != nil {
+			// Not fatal: without it we simply have the whole checkout.
+			fmt.Fprintf(os.Stderr, "warning: sparse checkout unavailable for %s (%v)\n%s\n", url, err, strings.TrimSpace(string(out)))
 		}
 		return dir, nil
 	}
@@ -269,6 +283,7 @@ func loadDir(c catalog) ([]Template, error) {
 		}
 		t.ID = e.Name()
 		t.Dir = filepath.Join(c.Dir, e.Name())
+		t.Root = c.Dir
 		t.Source = c.Label
 		if t.Name == "" {
 			t.Name = t.ID
@@ -322,4 +337,21 @@ func inCategory(ts []Template, cat string) []Template {
 		}
 	}
 	return out
+}
+
+// materialize checks out the chosen template's files, which a sparse catalog
+// has deliberately left out. A no-op for a catalog that is not sparse.
+func materialize(t Template) error {
+	if t.Root == "" {
+		return nil
+	}
+	sparse, err := exec.Command("git", "-C", t.Root, "config", "--get", "core.sparseCheckout").Output()
+	if err != nil || strings.TrimSpace(string(sparse)) != "true" {
+		return nil
+	}
+	cmd := exec.Command("git", "-C", t.Root, "sparse-checkout", "add", "--no-cone", "/"+t.ID+"/")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("fetching template %s: %w\n%s", t.ID, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

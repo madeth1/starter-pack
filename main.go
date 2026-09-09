@@ -185,6 +185,10 @@ func run() error {
 	if err := ensureTools(dirs, tmpl, *yes); err != nil {
 		return err
 	}
+	// The catalog only checked out manifests; fetch this template's files now.
+	if err := materialize(tmpl); err != nil {
+		return err
+	}
 
 	// pre_steps run in the parent, because a delegated scaffolder creates the
 	// project directory itself.
