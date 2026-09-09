@@ -50,25 +50,6 @@ nfpms:
     dependencies:
       - git
 
-homebrew_casks:
-  - name: starter
-    repository:
-      owner: madeth1
-      name: homebrew-tap
-      # GITHUB_TOKEN cannot push to another repo; see .github/workflows/release.yml
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-    homepage: https://github.com/madeth1/starter-pack
-    description: Scaffold projects from templates, with an arrow-key picker.
-    license: MIT
-    # The binaries are not code-signed, so strip the quarantine bit or macOS
-    # refuses to run them.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/starter"]
-          end
-
 scoops:
   - repository:
       owner: madeth1
@@ -97,8 +78,10 @@ release:
     ## Install
 
     ```sh
-    brew install madeth1/tap/starter                    # macOS / Linux
     scoop bucket add madeth1 https://github.com/madeth1/scoop-bucket && scoop install starter
     ```
 
     Debian/Ubuntu: download the `.deb` below and `sudo dpkg -i starter_*.deb`.
+
+    macOS/Linux: download the archive for your platform below, or `go install
+    github.com/madeth1/starter-pack@latest`.

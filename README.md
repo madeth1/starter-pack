@@ -15,6 +15,13 @@ project with its dependencies installed and its first commit made.
 
     go install github.com/madeth1/starter-pack@latest
 
+Or grab a binary or `.deb` from the [releases page][r]. On Windows:
+
+    scoop bucket add madeth1 https://github.com/madeth1/scoop-bucket
+    scoop install starter
+
+[r]: https://github.com/madeth1/starter-pack/releases
+
 ## What it does
 
 1. Syncs the template catalog (a separate git repo, cached under `~/.cache/project-starter`).
