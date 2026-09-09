@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -289,5 +290,84 @@ func TestRenderSkipsEmptyResult(t *testing.T) {
 	}
 	if got := read(t, filepath.Join(dst2, "compose.yaml")); got != "services: pg\n" {
 		t.Errorf("compose.yaml = %q", got)
+	}
+}
+
+// materialize must work on every git that supports sparse checkout, and must
+// never write a flag into the pattern list. `sparse-checkout add --no-cone`
+// did both wrong: rejected outright by macOS git, silently stored as a literal
+// pattern by newer git.
+func TestMaterialize(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	git := func(dir string, args ...string) {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	// A catalog with two templates.
+	origin := t.TempDir()
+	for _, id := range []string{"alpha", "beta"} {
+		write(t, filepath.Join(origin, id, "template.toml"), "name = \""+id+"\"\n")
+		write(t, filepath.Join(origin, id, "files", id+".txt"), id)
+	}
+	write(t, filepath.Join(origin, "tools.toml"), "[git]\ncheck = \"git --version\"\n")
+	git(origin, "init", "-q")
+	git(origin, "add", "-A")
+	git(origin, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+
+	// Clone it the way syncRepo does: manifests only.
+	clone := filepath.Join(t.TempDir(), "repo")
+	out, err := exec.Command("git", "clone", "-q", "--sparse", origin, clone).CombinedOutput()
+	if err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	git(clone, "sparse-checkout", "set", "--no-cone", "/tools.toml", "/*/template.toml")
+
+	exists := func(p string) bool { _, err := os.Stat(filepath.Join(clone, p)); return err == nil }
+	if exists("alpha/files/alpha.txt") {
+		t.Fatal("manifest-only checkout should not include files/")
+	}
+
+	if err := materialize(Template{ID: "alpha", Root: clone}); err != nil {
+		t.Fatal(err)
+	}
+	if !exists("alpha/files/alpha.txt") {
+		t.Error("alpha files were not checked out")
+	}
+	if exists("beta/files/beta.txt") {
+		t.Error("beta was fetched despite not being asked for")
+	}
+
+	// A second template must not evict the first.
+	if err := materialize(Template{ID: "beta", Root: clone}); err != nil {
+		t.Fatal(err)
+	}
+	if !exists("alpha/files/alpha.txt") || !exists("beta/files/beta.txt") {
+		t.Error("materializing beta disturbed alpha")
+	}
+
+	// The pattern list must contain patterns, never flags.
+	list, err := exec.Command("git", "-C", clone, "sparse-checkout", "list").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(list)), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "-") {
+			t.Errorf("a flag leaked into the sparse pattern list: %q", line)
+		}
+	}
+
+	// Re-materializing is a no-op, not an error.
+	if err := materialize(Template{ID: "alpha", Root: clone}); err != nil {
+		t.Errorf("second materialize of alpha: %v", err)
+	}
+	// A non-sparse checkout is simply left alone.
+	if err := materialize(Template{ID: "alpha", Root: origin}); err != nil {
+		t.Errorf("non-sparse repo should be a no-op: %v", err)
 	}
 }

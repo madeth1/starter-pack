@@ -341,6 +341,11 @@ func inCategory(ts []Template, cat string) []Template {
 
 // materialize checks out the chosen template's files, which a sparse catalog
 // has deliberately left out. A no-op for a catalog that is not sparse.
+//
+// It re-runs `sparse-checkout set` with the union of the patterns rather than
+// `add`: `add` rejects --no-cone on older git (macOS), and on newer git accepts
+// it as a literal pattern, which is worse. `set --no-cone` behaves the same
+// everywhere.
 func materialize(t Template) error {
 	if t.Root == "" {
 		return nil
@@ -349,8 +354,29 @@ func materialize(t Template) error {
 	if err != nil || strings.TrimSpace(string(sparse)) != "true" {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", t.Root, "sparse-checkout", "add", "--no-cone", "/"+t.ID+"/")
-	if out, err := cmd.CombinedOutput(); err != nil {
+
+	want := "/" + t.ID + "/"
+	out, err := exec.Command("git", "-C", t.Root, "sparse-checkout", "list").Output()
+	if err != nil {
+		return fmt.Errorf("reading sparse patterns for %s: %w", t.ID, err)
+	}
+	patterns := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		// Skip junk a previous version may have written into the cache, and
+		// anything git would read as a flag.
+		if line == "" || strings.HasPrefix(line, "-") {
+			continue
+		}
+		if line == want {
+			return nil // already checked out
+		}
+		patterns = append(patterns, line)
+	}
+	patterns = append(patterns, want)
+
+	args := append([]string{"-C", t.Root, "sparse-checkout", "set", "--no-cone"}, patterns...)
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("fetching template %s: %w\n%s", t.ID, err, strings.TrimSpace(string(out)))
 	}
 	return nil
