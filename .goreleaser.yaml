@@ -56,10 +56,13 @@ homebrew_casks:
       owner: madeth1
       name: homebrew-tap
       # GITHUB_TOKEN cannot push to another repo; see .github/workflows/release.yml
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
     homepage: https://github.com/madeth1/starter-pack
     description: Scaffold projects from templates, with an arrow-key picker.
     license: MIT
+    # Without the tap token the cask is still written to dist/, just not pushed,
+    # so a release never fails over a missing secret.
+    skip_upload: '{{ if envOrDefault "TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
     # The binaries are not code-signed, so strip the quarantine bit or macOS
     # refuses to run them.
     hooks:
@@ -73,10 +76,11 @@ scoops:
   - repository:
       owner: madeth1
       name: scoop-bucket
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
     homepage: https://github.com/madeth1/starter-pack
     description: Scaffold projects from templates, with an arrow-key picker.
     license: MIT
+    skip_upload: '{{ if envOrDefault "TAP_GITHUB_TOKEN" "" }}false{{ else }}true{{ end }}'
 
 checksum:
   name_template: checksums.txt
