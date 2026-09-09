@@ -126,3 +126,56 @@ func TestPickTemplateFromArgs(t *testing.T) {
 		t.Error("--yes with no template should error, not prompt")
 	}
 }
+
+// Variables are asked one per step. huh renders a group as a page, so the
+// number of groups is the number of screens - asserted structurally, because
+// keystrokes cannot tell the layouts apart: Enter advances both between fields
+// on a page and between pages.
+func TestVarsAreOneStepEach(t *testing.T) {
+	need := []Var{
+		{Key: "project_name", Default: "myapp"},
+		{Key: "db", Prompt: "Database", Choices: []string{"sqlite", "postgres"}},
+		{Key: "redis", Prompt: "Redis", Choices: []string{"no", "yes"}},
+	}
+	groups, answers := varGroups(need, varFlag{})
+	if len(groups) != 3 {
+		t.Errorf("got %d groups for 3 variables; every variable needs its own page", len(groups))
+	}
+	if len(answers) != 3 {
+		t.Errorf("got %d answer bindings, want 3", len(answers))
+	}
+	// A select with no default starts on its first choice, not empty.
+	if *answers["db"] != "sqlite" {
+		t.Errorf("db default = %q, want sqlite", *answers["db"])
+	}
+
+	// Anything already given with --var is not asked at all.
+	groups, answers = varGroups(need, varFlag{"db": "postgres", "project_name": "x"})
+	if len(groups) != 1 {
+		t.Errorf("got %d groups, want 1 - only redis is unanswered", len(groups))
+	}
+	if _, asked := answers["db"]; asked {
+		t.Error("db was already supplied and must not be asked")
+	}
+}
+
+// End to end through the real form: the answers land in vars.
+func TestCollectVarsSkipsAnswered(t *testing.T) {
+	tmpl := Template{Vars: []Var{
+		{Key: "db", Choices: []string{"sqlite", "postgres"}},
+		{Key: "redis", Choices: []string{"no", "yes"}},
+	}}
+	vars := varFlag{"project_name": "demo", "db": "postgres"}
+
+	// Only redis should be asked: one Enter must be enough to finish.
+	var err error
+	drive(t, []string{keyEnter}, func() {
+		err = collectVars(tmpl, vars, false)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars["db"] != "postgres" || vars["redis"] != "no" {
+		t.Errorf("got db=%q redis=%q", vars["db"], vars["redis"])
+	}
+}

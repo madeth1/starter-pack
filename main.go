@@ -307,38 +307,11 @@ func collectVars(tmpl Template, vars varFlag, yes bool) error {
 		return nil
 	}
 
-	answers := map[string]*string{}
-	var fields []huh.Field
-	for _, v := range need {
-		if _, ok := vars[v.Key]; ok {
-			continue
-		}
-		val := v.Default
-		answers[v.Key] = &val
-		title := v.Prompt
-		if title == "" {
-			title = v.Key
-		}
-		if len(v.Choices) > 0 {
-			if val == "" {
-				*answers[v.Key] = v.Choices[0]
-			}
-			fields = append(fields, huh.NewSelect[string]().
-				Title(title).
-				Options(huh.NewOptions(v.Choices...)...).
-				Value(answers[v.Key]))
-			continue
-		}
-		in := huh.NewInput().Title(title).Value(answers[v.Key])
-		if v.Key == "project_name" {
-			in = in.Validate(validName)
-		}
-		fields = append(fields, in)
-	}
-	if len(fields) == 0 {
+	groups, answers := varGroups(need, vars)
+	if len(groups) == 0 {
 		return nil
 	}
-	if err := runForm(huh.NewForm(huh.NewGroup(fields...))); err != nil {
+	if err := runForm(huh.NewForm(groups...)); err != nil {
 		return err
 	}
 	for k, p := range answers {
@@ -409,6 +382,41 @@ func validName(s string) error {
 		return errors.New("lowercase letters, digits, - and _; must start with a letter")
 	}
 	return nil
+}
+
+// varGroups builds one group per unanswered variable. huh renders a group as a
+// page, so this is what makes the prompts a sequence of steps rather than one
+// screen listing every option.
+func varGroups(need []Var, vars varFlag) ([]*huh.Group, map[string]*string) {
+	answers := map[string]*string{}
+	var groups []*huh.Group
+	for _, v := range need {
+		if _, ok := vars[v.Key]; ok {
+			continue
+		}
+		val := v.Default
+		answers[v.Key] = &val
+		title := v.Prompt
+		if title == "" {
+			title = v.Key
+		}
+		if len(v.Choices) > 0 {
+			if val == "" {
+				*answers[v.Key] = v.Choices[0]
+			}
+			groups = append(groups, huh.NewGroup(huh.NewSelect[string]().
+				Title(title).
+				Options(huh.NewOptions(v.Choices...)...).
+				Value(answers[v.Key])))
+			continue
+		}
+		in := huh.NewInput().Title(title).Value(answers[v.Key])
+		if v.Key == "project_name" {
+			in = in.Validate(validName)
+		}
+		groups = append(groups, huh.NewGroup(in))
+	}
+	return groups, answers
 }
 
 func options(ts []Template) []huh.Option[string] {
